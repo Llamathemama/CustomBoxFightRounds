@@ -12,6 +12,7 @@ using{ /UnrealEngine.com/Temporary/UI }
 using{ /Verse.org/Assets }
 using { /Fortnite.com/UI }
 
+
 # See https://dev.epicgames.com/documentation/en-us/uefn/create-your-own-device-in-verse for how to create a verse device.
 
 # A Verse-authored creative device that can be placed in a level
@@ -26,6 +27,14 @@ Custom_Round := class(creative_device):
     var ItemGranterDevices : []item_granter_device = array{}
     @editable
     var RematchCounter : player_counter_device = player_counter_device{}
+    @editable
+    Multipurpose_Timer : timer_device = timer_device{}
+    @editable
+    ModSkipCounter : player_counter_device = player_counter_device{}
+    @editable
+    Random_Granter : item_granter_device = item_granter_device{}
+    @editable
+    Random_Remover : item_remover_device = item_remover_device{}
     @editable
     var TestModeOn : logic = false
     @editable
@@ -43,6 +52,8 @@ Custom_Round := class(creative_device):
     var VotingArray : []int = array{0,0,0,0,0}
     var LastVote : [player]int = map{}
     var GranterToUse : int = 0
+    var HasModBeenSkipped : logic = false
+    var BarrierCounter : int = 0
     var UIMap : [player]?canvas = map{}
     
     
@@ -67,11 +78,24 @@ Custom_Round := class(creative_device):
     
 
     RoundStart()<suspends>:void=
+        
         Players := GetPlayspace().GetPlayers()
         TeamInterface := GetPlayspace().GetTeamCollection()
         Teams := TeamInterface.GetTeams()
-        for(Barrier : Barrier_Devices){
-            Barrier.Enable()
+        for(Player : Players){
+            if(PlayerUI := GetPlayerUI[Player], MyUI := UIMap[Player]?){
+                PlayerUI.RemoveWidget(MyUI)
+                if(set UIMap[Player] = false){}
+            }
+        }
+        if(Barrier_Devices.Length <= BarrierCounter){
+            set BarrierCounter = 0
+        }
+        for(X := BarrierCounter..BarrierCounter+1){
+            Print("Barrier {X} in use")
+            if(Barrier := Barrier_Devices[X]){
+                Barrier.Enable()
+            }
         }
         for(TeamNum := 1..2){
             Print("Performing Action for Team {TeamNum}.",?Duration := 5.0)
@@ -102,16 +126,22 @@ Custom_Round := class(creative_device):
         }
         for(Player : Players){
             if(ItemGranter := ItemGranterDevices[GranterToUse]){
-            ItemGranter.GrantItem(Player)
+            #ItemGranter.GrantItem(Player)
+            Random_Remover.Remove(Player)
+            Random_Granter.CycleToRandomItem(Player)
+            Random_Granter.GrantItem(Player)
             }
         }
 
         Timer_Device.Start()
         Timer_Device.SuccessEvent.Subscribe(RoundCountdown)
         HudEvent.Await()
-        for(Barrier : Barrier_Devices){
-            Barrier.Disable()
+        for(X := BarrierCounter..BarrierCounter+1){
+            if(Barrier := Barrier_Devices[X]){
+                Barrier.Disable()
+            }
         }
+        set BarrierCounter += 2
         Sleep(5.0)
         TeamThatWon := CheckIfRoundIsOver()
         Print("Team {ToString(TeamThatWon)} has won the match")
@@ -121,6 +151,14 @@ Custom_Round := class(creative_device):
         else if(TeamThatWon = 2){
             set TeamTwoWins += 1
         }
+        for(Player : Players){
+            if(PlayerUI := GetPlayerUI[Player]){
+                UI := WinScreenUI(Player,TeamThatWon)
+                if(set UIMap[Player] = option{UI}){}
+                PlayerUI.AddWidget(UI)
+            }
+        }
+        Sleep(2.0)
         Print("Enumeration: {Enumerate}")
         set RoundNum += 1
         Print("Round Number {RoundNum} concluding")
@@ -164,6 +202,7 @@ Custom_Round := class(creative_device):
             Sleep(1.0)
     InitVoting()<suspends>:void=
         Players := GetPlayspace().GetPlayers()
+        Multipurpose_Timer.Start()
         for(Player : Players){
             if(PlayerUI := GetPlayerUI[Player], set LastVote[Player] = -1){
                 UI := MakeCanvas()
@@ -179,14 +218,42 @@ Custom_Round := class(creative_device):
                 if(set UIMap[Player] = false){}
             }
         }
+        for(Player : Players){
+            
+            if(ItemGranter := ItemGranterDevices[GranterToUse]){
+            ItemGranter.GrantItem(Player)
+            
+        }
+            if(Agent := Player.GetFortCharacter[],Agent.TeleportTo[vector3{X:= 1220.0,Y:= -5036.0,Z:= 144.0},rotation{}]){
+                Multipurpose_Timer.SetMaxDuration(40.0)
+                Multipurpose_Timer.Reset()
+                Multipurpose_Timer.Start()
+                ModSkipCounter.CountSucceedsEvent.Subscribe(SkipModPhase)
+                var TimerInLoop : int = 0
+                loop:
+                    Sleep(1.0)
+                    set TimerInLoop += 1
+                    if(HasModBeenSkipped? or TimerInLoop >= 40){
+                        break
+                    }
+                    
+                
+            }
+        }
         
     HandleGameEnd(Team : team, WinMessage : string)<suspends>:void=
         Players := GetPlayspace().GetPlayers()
         TeamInterface := GetPlayspace().GetTeamCollection()
         Teams := TeamInterface.GetTeams()
+        for(Player : Players){
+            if(PlayerUI := GetPlayerUI[Player], MyUI := UIMap[Player]?){
+                PlayerUI.RemoveWidget(MyUI)
+                if(set UIMap[Player] = false){}
+            }
+        }
         # Replace the vector 3 with cords of the room
         for(Player : Players){
-            Player.Respawn(vector3{X:=1536.0, Y := 6400.0, Z:= 0.0},rotation{})
+            Player.Respawn(vector3{X:=-1256.0, Y := 6536.0, Z:= 68.0},rotation{})
         }
         RematchCounter.CountSucceedsEvent.Subscribe(RematchSignal)
         RoundEndEvent.Await()
@@ -232,6 +299,10 @@ Custom_Round := class(creative_device):
                 }
             }
             Sleep(1.0)
+    SkipModPhase():void=
+        set HasModBeenSkipped = true
+    
+
     RematchSignal():void=
         RoundEndEvent.Signal()
     RoundCountdown(Agent : ?agent):void=
@@ -298,12 +369,49 @@ Custom_Round := class(creative_device):
                 }
             }
         }
+    
+    WinScreenUI(Agent : agent, Winner : int):canvas=
+        Players := GetPlayspace().GetPlayers()
+        TeamInterface := GetPlayspace().GetTeamCollection()
+        Teams := TeamInterface.GetTeams()
+        var ImageToDisplay : texture = VotingUIWidgets.RoundWon
+        if(TeamInterface.IsOnTeam[Agent,Teams[Winner]]){
+            set ImageToDisplay = VotingUIWidgets.RoundWon
+        }
+        else{
+            set ImageToDisplay = VotingUIWidgets.RoundLoss
+        }
+        WinImage := texture_block{DefaultImage := ImageToDisplay,DefaultDesiredSize := vector2{X:= 1920.0,Y:= 1080.0}}
+        RoundEndScreen : canvas = canvas:
+            Slots := array:
+                canvas_slot:
+                    Widget := WinImage
+                
+                
+        
+        TeamOneUI := text_block{DefaultText := S2M("{TeamOneWins} :"),DefaultTextColor := NamedColors.Red}
+        TeamTwoUI := text_block{DefaultText := S2M("{TeamTwoWins}"),DefaultTextColor := NamedColors.Blue}
+        DifferentVectors := array{vector2{X:=920.0,Y:= 704.0},vector2{X:=965.0,Y:= 704.0}}
+        DifferentText := array{TeamOneUI,TeamTwoUI}
+        for(X := 0..1){
+            if(Text := DifferentText[X],Vector:= DifferentVectors[X]){
+                NewText := MakeCanvasSlot(Widget:= Text,Position:=Vector,?Size:= vector2{X:=500.0,Y:=500.0})
+                RoundEndScreen.AddWidget(NewText)
+            }
+        }
+        return RoundEndScreen
+
+        
+
     GetMaxValue(MyArray : []int):int=
         var CurValue : int = 0
         for(Value : MyArray){
             if(Value > CurValue){
                 set CurValue = Value
             }
+        }
+        if(CurValueIndex := MyArray.Find[CurValue]){
+            return CurValueIndex
         }
         return CurValue
 
@@ -316,12 +424,6 @@ ButtonClass := class:
     CanvasSlotForButton(B : text_button_base):canvas_slot=
         Slot := MakeCanvasSlot(Widget:=B,Position:=vector2{X:=XCord,Y:=748.0}, ?Size := vector2{X := 218.118118, Y:=56.016014})
         return Slot
-
-    
-   
-        
-        
-
                 
             
             
